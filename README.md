@@ -138,19 +138,22 @@ curl -s http://localhost:8001/v1/metrics/summary
 
 ## Architecture Overview
 
-```txt
-user browser                  ops/eng browser
-     |                              |
-     v                              v
-  chat-ui  (nginx :5173)     dashboard-ui (nginx :5174)
-     |  /api/* -> :8000             |  /api/* -> :8001
-     v                              v
-  chat-service                observability-service
-   |  chat_app_db                   ^   |
-   |  inference-sdk                 |   |
-   |    -> foundation model         |   ingestion_events  (raw)
-   |    -> NATS JetStream  ---->----+   inference_logs    (normalized)
-   |       (inference.events)           metrics APIs
+```mermaid
+flowchart LR
+  user[User browser] --> chatUI["chat-ui<br/>nginx :5173"]
+  operator[Ops / engineer browser] --> dashboardUI["dashboard-ui<br/>nginx :5174"]
+
+  chatUI -->|"/api/*"| chatService["chat-service<br/>FastAPI :8000"]
+  dashboardUI -->|"/api/*"| observabilityService["observability-service<br/>FastAPI :8001"]
+
+  chatService --> chatDb[("chat_app_db<br/>conversations<br/>chat_messages")]
+  chatService --> sdk["inference-sdk<br/>redaction + telemetry"]
+  sdk --> provider["Foundation model<br/>mock / OpenAI-compatible"]
+  sdk -->|"inference.events"| nats[("NATS JetStream")]
+
+  nats --> observabilityService
+  observabilityService --> observabilityDb[("observability_db<br/>ingestion_events raw<br/>inference_logs normalized")]
+  observabilityService --> metrics["Metrics + logs APIs"]
 ```
 
 Four deployable services with clean boundaries:

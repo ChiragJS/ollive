@@ -11,23 +11,69 @@ This project treats the chat application and inference observability stack as se
 - `dashboard-ui` is the operator-facing SPA. It is paired with `observability-service` and never talks to the chat service.
 - NATS JetStream decouples the two backends. There is no direct HTTP call between them.
 
+## System Architecture
+
+```mermaid
+flowchart LR
+  user[User browser] --> chatUI["chat-ui<br/>nginx :5173"]
+  operator[Operator browser] --> dashboardUI["dashboard-ui<br/>nginx :5174"]
+
+  subgraph product[Product surface]
+    chatUI -->|"/api/*"| chatService["chat-service<br/>FastAPI :8000"]
+    chatService --> chatDb[("chat_app_db<br/>conversations<br/>chat_messages")]
+    chatService --> sdk["inference-sdk"]
+  end
+
+  subgraph model[LLM providers]
+    sdk --> provider["mock / OpenAI / DeepSeek<br/>Groq / OpenRouter"]
+  end
+
+  subgraph transport[Event transport]
+    sdk -->|"inference.events"| nats[("NATS JetStream")]
+  end
+
+  subgraph operatorSurface[Operator surface]
+    nats --> observabilityService["observability-service<br/>FastAPI :8001"]
+    dashboardUI -->|"/api/*"| observabilityService
+    observabilityService --> observabilityDb[("observability_db<br/>ingestion_events<br/>inference_logs")]
+  end
+```
+
 ## Ingestion Flow
 
-```txt
-user browser                          operator browser
-     |                                       |
-     v                                       v
-  chat-ui (nginx :5173)              dashboard-ui (nginx :5174)
-     |  /api/* -> chat-service              |  /api/* -> observability-service
-     v                                       v
-  chat-service :8000                  observability-service :8001
-     |  chat_app_db                          ^   |  observability_db
-     |    conversations                      |   |    ingestion_events  (raw)
-     |    chat_messages                      |   |    inference_logs    (normalized)
-     |  inference-sdk                        |   |  dashboard APIs
-     |    -> OpenAI-compatible / mock        |   |
-     |    -> NATS JetStream "inference.events"   |
-     +---------------------------------------+---+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Browser as User browser
+  participant ChatUI as chat-ui
+  participant Chat as chat-service
+  participant ChatDB as chat_app_db
+  participant SDK as inference-sdk
+  participant Provider as LLM provider
+  participant NATS as NATS JetStream
+  participant Obs as observability-service
+  participant ObsDB as observability_db
+  participant Dashboard as dashboard-ui
+
+  Browser->>ChatUI: Send prompt
+  ChatUI->>Chat: POST /api/v1/conversations/{id}/messages
+  Chat->>ChatDB: Store user and assistant messages
+  Chat->>SDK: complete or stream request
+  SDK->>Provider: Provider API call
+  Provider-->>SDK: Model response or error
+  SDK->>SDK: Redact previews and compute hashes
+  SDK->>NATS: Publish inference.events
+  SDK-->>Chat: Return response or stream deltas
+  Chat->>ChatDB: Finalize assistant message
+  Chat-->>ChatUI: Response / SSE events
+  ChatUI-->>Browser: Render assistant message
+
+  NATS-->>Obs: JetStream consumer delivery
+  Obs->>ObsDB: Store ingestion_events raw payload
+  Obs->>ObsDB: Normalize into inference_logs
+  Dashboard->>Obs: GET metrics and logs APIs
+  Obs->>ObsDB: Query inference_logs
+  Obs-->>Dashboard: Metrics, samples, and details
 ```
 
 The observability service also exposes `POST /v1/ingest/events` for SDKs that cannot publish to NATS directly and for contract testing.
