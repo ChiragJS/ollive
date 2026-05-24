@@ -1,0 +1,14 @@
+{
+  "name": "ollive-assignment",
+  "private": true,
+  "version": "0.1.0",
+  "bin": {
+    "ollive-up": "./scripts/compose-up.sh"
+  },
+  "scripts": {
+    "up": "./scripts/compose-up.sh",
+    "kind:up": "./scripts/kind-up.sh",
+    "kind:port-forward": "./scripts/port-forward.sh",
+    "push:images": "./scripts/push-images.sh"
+  }
+}

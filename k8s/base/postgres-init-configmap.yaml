@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+data:
+  001_schema.sql: |
+    CREATE DATABASE chat_app_db OWNER ollive;
+    CREATE DATABASE observability_db OWNER ollive;
+
+    \connect chat_app_db
+
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+    CREATE TABLE conversations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      title TEXT NOT NULL DEFAULT 'New conversation',
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'archived')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      cancelled_at TIMESTAMPTZ
+    );
+
+    CREATE TABLE chat_messages (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
+      content TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('pending', 'completed', 'cancelled', 'failed')),
+      provider TEXT,
+      model TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX idx_conversations_updated_at ON conversations(updated_at DESC);
+    CREATE INDEX idx_chat_messages_conversation_created_at ON chat_messages(conversation_id, created_at ASC);
+    CREATE INDEX idx_chat_messages_status ON chat_messages(status);
+
+    \connect observability_db
+
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+    CREATE TABLE applications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE ingestion_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      event_id UUID UNIQUE,
+      event_type TEXT,
+      schema_version TEXT,
+      source_application TEXT,
+      source_service TEXT,
+      environment TEXT,
+      raw_payload JSONB NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processed', 'invalid', 'failed')),
+      validation_error TEXT,
+      processing_error TEXT,
+      received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      processed_at TIMESTAMPTZ
+    );
+
+    CREATE TABLE inference_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      ingestion_event_id UUID NOT NULL REFERENCES ingestion_events(id) ON DELETE CASCADE,
+      request_id TEXT NOT NULL,
+      trace_id TEXT NOT NULL,
+      session_id TEXT,
+      external_conversation_id TEXT,
+      external_message_id TEXT,
+      application_name TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      environment TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      model_alias TEXT,
+      streaming BOOLEAN NOT NULL DEFAULT false,
+      status TEXT NOT NULL CHECK (status IN ('success', 'error', 'cancelled', 'timeout')),
+      http_status_code INTEGER,
+      error_type TEXT,
+      error_message_preview TEXT,
+      finish_reason TEXT,
+      latency_ms INTEGER,
+      time_to_first_token_ms INTEGER,
+      prompt_tokens INTEGER,
+      completion_tokens INTEGER,
+      total_tokens INTEGER,
+      estimated_cost_usd NUMERIC(12, 8),
+      temperature NUMERIC(4, 3),
+      max_tokens INTEGER,
+      input_preview TEXT,
+      output_preview TEXT,
+      input_hash TEXT,
+      output_hash TEXT,
+      redaction_applied BOOLEAN NOT NULL DEFAULT false,
+      redaction_count INTEGER NOT NULL DEFAULT 0,
+      redaction_policy TEXT,
+      redaction_types JSONB NOT NULL DEFAULT '[]'::jsonb,
+      redaction_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      request_params JSONB NOT NULL DEFAULT '{}'::jsonb,
+      provider_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      started_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX idx_ingestion_events_received_at ON ingestion_events(received_at DESC);
+    CREATE INDEX idx_ingestion_events_status ON ingestion_events(status);
+    CREATE INDEX idx_inference_logs_completed_at ON inference_logs(completed_at DESC);
+    CREATE INDEX idx_inference_logs_provider_model ON inference_logs(provider, model);
+    CREATE INDEX idx_inference_logs_status ON inference_logs(status);
+    CREATE INDEX idx_inference_logs_trace_id ON inference_logs(trace_id);
+    CREATE INDEX idx_inference_logs_external_conversation_id ON inference_logs(external_conversation_id);

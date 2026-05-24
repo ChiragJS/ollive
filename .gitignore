@@ -1,0 +1,30 @@
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!.env.*.example
+
+# Local Kubernetes secrets and generated manifests with runtime values.
+k8s/secret.yaml
+k8s/secret*.yaml
+k8s/*secret*.yaml
+k8s/**/*secret*.yaml
+!k8s/secret.example.yaml
+k8s/*.local.yaml
+k8s/**/*.local.yaml
+
+# Private keys/certificates used for local demos.
+*.key
+*.pem
+*.p12
+*.pfx
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+dist/
+build/
+.DS_Store
